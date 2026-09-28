@@ -1,0 +1,14 @@
+# Cơ sở dữ liệu và file tạm SQLite
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# File chứa biến môi trường / API key bí mật
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+.venv/
+env/
