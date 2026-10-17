@@ -11,11 +11,11 @@ from telebot import util
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
 
-# Tải cấu hình biến môi trường từ file .env
+# Load environment variables from .env file
 load_dotenv()
 
 # =====================================================================
-# 🛠️ CẤU HÌNH TÀI NGUYÊN VÀ QUẢN TRỊ
+# 🛠️ CONFIGURATION & ADMINISTRATION
 # =====================================================================
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 bot = telebot.TeleBot(TOKEN)
@@ -23,7 +23,7 @@ bot = telebot.TeleBot(TOKEN)
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", 0))
 DB_NAME = "ig_commercial_radar.db"
 
-# Kho hàng chờ API: Tải từ .env (phân tách bởi dấu phẩy nếu có nhiều key)
+# API Pool queue: Loaded from .env (comma-separated keys)
 raw_keys = os.getenv("SCRAPE_API_KEY", "")
 API_POOL = [k.strip() for k in raw_keys.split(",") if k.strip()]
 
@@ -33,18 +33,18 @@ INTERNAL_USAGE_COUNTER = 0
 IS_QUOTA_ALERT_SENT = False
 
 def get_vietnam_time():
-    """Đồng bộ múi giờ UTC+7."""
+    """Synchronize UTC+7 timezone."""
     return datetime.utcnow() + timedelta(hours=7)
 
 def get_current_token():
-    """Lấy token hiện hành ở đầu hàng chờ."""
+    """Retrieve the active token at the head of the queue."""
     global API_POOL, CURRENT_API_INDEX
     if API_POOL and 0 <= CURRENT_API_INDEX < len(API_POOL):
         return API_POOL[CURRENT_API_INDEX].strip()
     return ""
 
 def fetch_remaining_quota():
-    """Tính toán dung lượng quota còn lại."""
+    """Calculate remaining quota based on 1000 base requests."""
     global INTERNAL_USAGE_COUNTER
     remaining = 1000 - INTERNAL_USAGE_COUNTER
     if remaining < 0:
@@ -52,7 +52,7 @@ def fetch_remaining_quota():
     return remaining, f"{remaining}/1000"
 
 def switch_to_next_api_logic():
-    """Xóa token hết hạn và chuyển sang token tiếp theo."""
+    """Remove exhausted token and rotate to the next one."""
     global CURRENT_API_INDEX, API_POOL, INTERNAL_USAGE_COUNTER
     if not API_POOL:
         return False
@@ -67,9 +67,9 @@ def switch_to_next_api_logic():
         try:
             bot.send_message(
                 ADMIN_CHAT_ID, 
-                f"🔄 **HỆ THỐNG TỰ ĐỘNG XOAY TUA POOL!**\n\n"
-                f"🗑️ Đã xóa 1 token hết hạn.\n"
-                f"🗂️ Số token còn lại: `{len(API_POOL)}`"
+                f"🔄 **API POOL AUTO-ROTATION!**\n\n"
+                f"🗑️ Removed 1 exhausted token.\n"
+                f"🗂️ Remaining tokens in pool: `{len(API_POOL)}`"
             )
         except:
             pass
@@ -77,12 +77,12 @@ def switch_to_next_api_logic():
     return False
 
 def format_duration(seconds):
-    """Quy đổi số giây sang định dạng ..h ..p ..s."""
+    """Format duration in seconds into ..h ..m ..s format."""
     seconds = max(0, int(seconds))
     hours = seconds // 3600
     minutes = (seconds % 3600) // 60
     secs = seconds % 60
-    return f"{hours}h {minutes}p {secs}s"
+    return f"{hours}h {minutes}m {secs}s"
 
 def calculate_expire_date(days, base_time=None):
     if base_time is None:
@@ -107,18 +107,18 @@ def get_time_remaining_string(expire_date_str):
         vn_now = get_vietnam_time()
         expire_date = datetime.strptime(expire_date_str, "%Y-%m-%d %H:%M:%S")
         if expire_date < vn_now:
-            return "Hết hạn"
+            return "Expired"
         delta = expire_date - vn_now
         days = delta.days
         hours = delta.seconds // 3600
         minutes = (delta.seconds % 3600) // 60
         secs = delta.seconds % 60
-        return f"{days} ngày {hours:02d}:{minutes:02d}:{secs:02d}"
+        return f"{days} days {hours:02d}:{minutes:02d}:{secs:02d}"
     except:
-        return "0 ngày 00:00:00"
+        return "0 days 00:00:00"
 
 # =====================================================================
-# ⚡ LÕI KIỂM TRA TRẠNG THÁI INSTAGRAM
+# ⚡ INSTAGRAM GATEWAY ENGINE
 # =====================================================================
 def check_instagram_status_via_gateway(username):
     global INTERNAL_USAGE_COUNTER, IS_QUOTA_ALERT_SENT
@@ -174,9 +174,9 @@ def check_instagram_status_via_gateway(username):
                     now_str = get_vietnam_time().strftime("%Y-%m-%d %H:%M:%S")
                     bot.send_message(
                         ADMIN_CHAT_ID,
-                        f"🚨 **POOL API ĐÃ CẠN KIỆT TOÀN BỘ!**\n\n"
-                        f"⏰ Thời điểm: [{now_str} VN]\n"
-                        f"Vui lòng nạp thêm token bằng lệnh `/setpool`.",
+                        f"🚨 **ALL API TOKENS IN POOL ARE EXHAUSTED!**\n\n"
+                        f"⏰ Timestamp: [{now_str} UTC+7]\n"
+                        f"Please add more tokens using `/setpool` command.",
                         parse_mode="Markdown"
                     )
                     IS_QUOTA_ALERT_SENT = True
@@ -185,7 +185,7 @@ def check_instagram_status_via_gateway(username):
         return "UNKNOWN"
 
 # =====================================================================
-# 💾 QUẢN LÝ DỮ LIỆU SQLITE (HỖ TRỢ ĐẾM THỜI GIAN HỒI SINH)
+# 💾 SQLITE DATABASE ENGINE (WITH REVIVAL DURATION TRACKING)
 # =====================================================================
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -205,7 +205,6 @@ def init_db():
             UNIQUE(user_id, target_value)
         )
     ''')
-    # Bổ sung các cột nếu db đã tồn tại từ trước
     for col, definition in [
         ("expire_date", "TEXT"),
         ("note", "TEXT DEFAULT ''"),
@@ -236,7 +235,7 @@ def add_to_customer_list(user_id, target_value, target_type="USER", current_stat
               current_status, expire_date, note_text, now_vn_str))
         conn.commit()
     except Exception as e:
-        print(f"Lỗi thêm database: {e}")
+        print(f"Database insertion error: {e}")
     finally:
         conn.close()
 
@@ -335,7 +334,7 @@ def extract_username_from_link(input_str):
     return input_str.replace("@", "").replace("/", "").strip()
 
 # =====================================================================
-# 🔄 LUỒNG TUẦN TRA RADAR NGẦM
+# 🔄 BACKGROUND RADAR MONITORING THREAD
 # =====================================================================
 def auto_scan_commercial_radar_v8():
     global IS_QUOTA_ALERT_SENT
@@ -354,9 +353,9 @@ def auto_scan_commercial_radar_v8():
                     try:
                         bot.send_message(
                             u_id, 
-                            f"⏰ **THÔNG BÁO HẾT HẠN!**\n\n"
-                            f"👤 Tài khoản `@{target}` đã hết hạn giám sát.\n"
-                            f"Hệ thống đã dừng theo dõi mục tiêu này."
+                            f"⏰ **MONITORING EXPIRED!**\n\n"
+                            f"👤 Target `@{target}` has reached its monitoring expiration date.\n"
+                            f"The system has automatically removed this target from background monitoring."
                         )
                     except:
                         pass
@@ -371,7 +370,7 @@ def auto_scan_commercial_radar_v8():
                 now_time = get_vietnam_time().strftime('%H:%M:%S')
                 _, quota_str = fetch_remaining_quota()
                 total_keys = len(API_POOL)
-                print(f"\n🚀 [RADAR SCAN] - {now_time} VN | [Kho: {total_keys} Key | Đang dùng: 1/{total_keys} | Quota: {quota_str}] | Tổng: {total_tasks} nick")
+                print(f"\n🚀 [RADAR SCAN] - {now_time} UTC+7 | [Pool: {total_keys} Keys | Active: 1/{total_keys} | Current Quota: {quota_str}] | Total: {total_tasks} accounts")
                 
                 for index, (user_id, target_value, last_status, added_at_str) in enumerate(all_targets, 1):
                     current_time_str = get_vietnam_time().strftime('%H:%M:%S')
@@ -382,7 +381,7 @@ def auto_scan_commercial_radar_v8():
                         icon_terminal = "🟡 UNKNOWN"
                     print(f"👉 [{current_time_str}] [{index}/{total_tasks}] @{target_value} ➔ {icon_terminal}")
                     
-                    # Phát hiện trạng thái DIE -> LIVE (Hồi sinh)
+                    # Detect status transition: DIE -> LIVE (Revived)
                     if last_status == "DIE" and current_result == "LIVE":
                         time.sleep(2)
                         res2 = check_instagram_status_via_gateway(target_value)
@@ -393,8 +392,7 @@ def auto_scan_commercial_radar_v8():
                             vn_now = get_vietnam_time()
                             now = vn_now.strftime("%Y-%m-%d %H:%M:%S")
                             
-                            # Tính thời gian chờ từ lúc nạp
-                            times_taken_str = "0h 0p 0s"
+                            times_taken_str = "0h 0m 0s"
                             if added_at_str:
                                 try:
                                     added_dt = datetime.strptime(added_at_str, "%Y-%m-%d %H:%M:%S")
@@ -407,22 +405,22 @@ def auto_scan_commercial_radar_v8():
                             
                             bot.send_message(
                                 user_id, 
-                                f"🔔 **THÔNG BÁO TÀI KHOẢN HỒI SINH!** 🎉\n\n"
+                                f"🔔 **ACCOUNT REVIVED NOTIFICATION!** 🎉\n\n"
                                 f"👤 Username: `{target_value}`\n"
-                                f"🟢 Trạng thái: [LIVE]\n"
+                                f"🟢 Status: [LIVE]\n"
                                 f"⏱️ Times Taken: `{times_taken_str}`\n"
-                                f"⏰ Thời gian: [{now} VN]", 
+                                f"⏰ Timestamp: [{now} UTC+7]", 
                                 parse_mode="Markdown"
                             )
                         else:
-                            bot.send_message(user_id, f"⚙️ **Hệ thống:** Tài khoản `@{target_value}` đang phát sinh dữ liệu nhiễu...")
+                            bot.send_message(user_id, f"⚙️ **System:** Fluctuating status detected for target `@{target_value}`...")
                             markup = InlineKeyboardMarkup()
-                            btn_live = InlineKeyboardButton("🟢 Báo LIVE cho khách", callback_data=f"force_live|{user_id}|{target_value}")
-                            btn_die = InlineKeyboardButton("🔴 Báo DIE cho khách", callback_data=f"force_die|{user_id}|{target_value}")
+                            btn_live = InlineKeyboardButton("🟢 Report LIVE to User", callback_data=f"force_live|{user_id}|{target_value}")
+                            btn_die = InlineKeyboardButton("🔴 Report DIE to User", callback_data=f"force_die|{user_id}|{target_value}")
                             markup.add(btn_live, btn_die)
                             bot.send_message(
                                 ADMIN_CHAT_ID, 
-                                f"👑 **DUYỆT THỦ CÔNG:**\n\n📌 Mục tiêu: `@{target_value}`\nChọn trạng thái:", 
+                                f"👑 **MANUAL REVIEW REQUIRED:**\n\n📌 Target: `@{target_value}`\nSelect status:", 
                                 reply_markup=markup, 
                                 parse_mode="Markdown"
                             )
@@ -432,22 +430,22 @@ def auto_scan_commercial_radar_v8():
                         now = get_vietnam_time().strftime("%Y-%m-%d %H:%M:%S")
                         bot.send_message(
                             user_id, 
-                            f"⚠️ **CẢNH BÁO TÀI KHOẢN ĐỘT TỬ!** 😭\n\n"
+                            f"⚠️ **ACCOUNT DOWN ALERT!** 😭\n\n"
                             f"👤 Username: `{target_value}`\n"
-                            f"❌ Trạng thái: [DIE]\n"
-                            f"⏰ Thời gian: [{now} VN]", 
+                            f"❌ Status: [DIE]\n"
+                            f"⏰ Timestamp: [{now} UTC+7]", 
                             parse_mode="Markdown"
                         )
                     time.sleep(random.uniform(2, 4))
                 
                 finish_time = get_vietnam_time().strftime('%H:%M:%S')
-                print(f"🏁 Hoàn thành chu kỳ lúc {finish_time} VN. Chờ 5 phút...\n")
+                print(f"🏁 Patrol cycle completed at {finish_time} UTC+7. Sleeping for 5 minutes...\n")
             time.sleep(300)
         except Exception as e:
             time.sleep(15)
 
 # =====================================================================
-# 🎛️ XỬ LÝ NÚT BẤM DUYỆT TAY CỦA ADMIN
+# 🎛️ ADMIN INLINE CALLBACK HANDLER
 # =====================================================================
 @bot.callback_query_handler(func=lambda call: call.data.startswith(('force_live', 'force_die')))
 def handle_admin_decision(call):
@@ -458,7 +456,7 @@ def handle_admin_decision(call):
     
     if action == "force_live":
         db_info = get_single_target(user_id, target_value)
-        times_taken_str = "0h 0p 0s"
+        times_taken_str = "0h 0m 0s"
         if db_info and db_info[3]:
             try:
                 added_dt = datetime.strptime(db_info[3], "%Y-%m-%d %H:%M:%S")
@@ -468,50 +466,50 @@ def handle_admin_decision(call):
                 pass
                 
         update_status_db(user_id, target_value, "LIVE", times_taken_str)
-        bot.edit_message_text(f"✅ Đã duyệt `@{target_value}`: LIVE.", call.message.chat.id, call.message.message_id)
+        bot.edit_message_text(f"✅ Approved `@{target_value}`: LIVE.", call.message.chat.id, call.message.message_id)
         bot.send_message(
             user_id, 
-            f"🔔 **THÔNG BÁO TÀI KHOẢN HỒI SINH!** 🎉\n\n"
+            f"🔔 **ACCOUNT REVIVED NOTIFICATION!** 🎉\n\n"
             f"👤 Username: `{target_value}`\n"
-            f"🟢 Trạng thái: [LIVE]\n"
+            f"🟢 Status: [LIVE]\n"
             f"⏱️ Times Taken: `{times_taken_str}`\n"
-            f"⏰ Thời gian: [{now} VN]", 
+            f"⏰ Timestamp: [{now} UTC+7]", 
             parse_mode="Markdown"
         )
     elif action == "force_die":
         update_status_db(user_id, target_value, "DIE")
-        bot.edit_message_text(f"✅ Đã duyệt `@{target_value}`: DIE.", call.message.chat.id, call.message.message_id)
+        bot.edit_message_text(f"✅ Approved `@{target_value}`: DIE.", call.message.chat.id, call.message.message_id)
         bot.send_message(
             user_id, 
-            f"⚠️ **CẢNH BÁO HOÀN TẤT RÀ SOÁT:**\n"
-            f"Tài khoản `@{target_value}` ngưng hoạt động [DIE]!\n"
-            f"⏰ Thời gian: [{now} VN]", 
+            f"⚠️ **ACCOUNT REVIEW COMPLETED:**\n"
+            f"Target `@{target_value}` confirmed inactive [DIE]!\n"
+            f"⏰ Timestamp: [{now} UTC+7]", 
             parse_mode="Markdown"
         )
 
 # =====================================================================
-# 👑 LỆNH QUẢN TRỊ VIÊN (ADMIN)
+# 👑 ADMIN COMMANDS
 # =====================================================================
 @bot.message_handler(commands=['admin'])
 def handle_admin_panel(message):
     if message.from_user.id != ADMIN_CHAT_ID:
-        bot.reply_to(message, "❌ Lệnh chỉ dành cho Admin!")
+        bot.reply_to(message, "❌ Access denied: Admin command only!")
         return
     _, quota_str = fetch_remaining_quota()
     active_key = get_current_token()
     total_keys = len(API_POOL)
-    key_display = f"`{active_key[:8]}...{active_key[-5:]}`" if active_key else "`Trống`"
+    key_display = f"`{active_key[:8]}...{active_key[-5:]}`" if active_key else "`Empty`"
     
     menu_admin = (
-        "👑 **BẢNG ĐIỀU KHIỂN QUẢN TRỊ**\n"
+        "👑 **ADMIN CONTROL PANEL**\n"
         "----------------------------------------\n"
-        "⚙️ `/settoken [Key]` : Chèn 1 token lên đầu danh sách trực chiến\n"
-        "⚙️ `/setpool [k1 k2 ...]` : Nạp hàng loạt key vào hàng chờ\n"
-        "📊 `/viewdata` : Xuất danh sách theo dõi của khách hàng\n"
+        "⚙️ `/settoken [Key]` : Prepend 1 new token to the front of queue\n"
+        "⚙️ `/setpool [k1 k2 ...]` : Load multiple tokens into the queue\n"
+        "📊 `/viewdata` : Export target monitoring list\n"
         "----------------------------------------\n"
-        f"🎯 *Số key trong hàng chờ:* `{total_keys}`\n"
-        f"🔑 *Key đang chạy:* {key_display}\n"
-        f"📊 *Quota key hiện tại:* `{quota_str}`"
+        f"🎯 *Tokens in queue:* `{total_keys}`\n"
+        f"🔑 *Active Token:* {key_display}\n"
+        f"📊 *Current Quota:* `{quota_str}`"
     )
     bot.reply_to(message, menu_admin, parse_mode="Markdown")
 
@@ -521,7 +519,7 @@ def handle_set_token(message):
         return
     msg_parts = message.text.split()
     if len(msg_parts) < 2:
-        bot.reply_to(message, "⚠️ Cú pháp: `/settoken [mã_token]`")
+        bot.reply_to(message, "⚠️ Usage: `/settoken [token_key]`")
         return
     global API_POOL, CURRENT_API_INDEX, INTERNAL_USAGE_COUNTER, IS_QUOTA_ALERT_SENT
     clean_token = re.sub(r'[\s\n\r]', '', msg_parts[1])
@@ -529,7 +527,7 @@ def handle_set_token(message):
     CURRENT_API_INDEX = 0
     INTERNAL_USAGE_COUNTER = 0
     IS_QUOTA_ALERT_SENT = False
-    bot.reply_to(message, f"✅ Đã chèn token mới lên vị trí đầu hàng chờ (Tổng: `{len(API_POOL)}` key) và đặt lại quota!", parse_mode="Markdown")
+    bot.reply_to(message, f"✅ Successfully added new active token to queue front (Total: `{len(API_POOL)}` keys) and reset usage quota!", parse_mode="Markdown")
 
 @bot.message_handler(commands=['setpool'])
 def handle_set_pool(message):
@@ -537,14 +535,14 @@ def handle_set_pool(message):
         return
     targets = parse_bulk_inputs(message.text, '/setpool')
     if not targets:
-        bot.reply_to(message, "⚠️ Cú pháp: `/setpool key1 key2 ...`")
+        bot.reply_to(message, "⚠️ Usage: `/setpool key1 key2 ...`")
         return
     global API_POOL, CURRENT_API_INDEX, INTERNAL_USAGE_COUNTER, IS_QUOTA_ALERT_SENT
     API_POOL = [re.sub(r'[\s\n\r]', '', k) for k in targets]
     CURRENT_API_INDEX = 0
     INTERNAL_USAGE_COUNTER = 0
     IS_QUOTA_ALERT_SENT = False
-    bot.reply_to(message, f"✅ Đã nạp `{len(API_POOL)}` token vào hàng chờ tuần tự!", parse_mode="Markdown")
+    bot.reply_to(message, f"✅ Successfully loaded `{len(API_POOL)}` tokens into the sequential queue!", parse_mode="Markdown")
 
 @bot.message_handler(commands=['viewdata'])
 def handle_view_data(message):
@@ -552,11 +550,11 @@ def handle_view_data(message):
         return
     all_rows = get_all_targets_for_admin()
     if not all_rows:
-        bot.reply_to(message, "📊 Hiện chưa có mục tiêu nào trong hệ thống.")
+        bot.reply_to(message, "📊 No active targets found in the database.")
         return
     now_str = get_vietnam_time().strftime("%Y-%m-%d %H:%M:%S")
-    report = f"📊 **DỮ LIỆU THEO DÕI REAL-TIME**\n"
-    report += f"⏰ Cập nhật: [{now_str} VN] | Tổng: `{len(all_rows)}` acc\n"
+    report = f"📊 **REAL-TIME MONITORING DATABASE**\n"
+    report += f"⏰ Updated: [{now_str} UTC+7] | Total: `{len(all_rows)}` targets\n"
     report += "----------------------------------------\n\n"
     
     grouped_data = {}
@@ -564,7 +562,7 @@ def handle_view_data(message):
         grouped_data.setdefault(user_id, []).append((target_value, last_status))
         
     for client_id, targets in grouped_data.items():
-        report += f"👤 **Khách hàng (`{client_id}`):**\n"
+        report += f"👤 **Client (`{client_id}`):**\n"
         for idx, (username, status) in enumerate(targets, 1):
             icon = "🟢 Live" if status == "LIVE" else "🔴 Die"
             report += f"   {idx}. {icon} - `@{username}`\n"
@@ -574,18 +572,18 @@ def handle_view_data(message):
         bot.send_message(message.chat.id, text, parse_mode="Markdown")
 
 # =====================================================================
-# 🤖 LỆNH NGƯỜI DÙNG
+# 🤖 USER COMMANDS
 # =====================================================================
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     menu = (
-        "📸 **INSTAGRAM RADAR SYSTEM**\n\n"
-        "⚡ `/check [User]` : Kiểm tra trạng thái tức thì\n"
-        "👤 `/user [List_User] [Số_Ngày] [Ghi_Chú]` : Nạp nick (Mặc định: 7 ngày)\n"
-        "📝 `/note [User] [Ghi chú]` : Bổ sung ghi chú\n"
-        "⏳ `/updatetime [User] [Số ngày]` : Cộng dồn hạn giám sát\n"
-        "📋 `/list` : Xem danh sách tài khoản theo dõi\n"
-        "🗑️ `/del [List_User]` : Xóa nick khỏi hệ thống"
+        "📸 **INSTAGRAM RADAR MONITORING BOT**\n\n"
+        "⚡ `/check [User]` : Instant real-time status check\n"
+        "👤 `/user [List_User] [Days] [Note]` : Add targets (Default: 7 days)\n"
+        "📝 `/note [User] [Note]` : Add or update target note\n"
+        "⏳ `/updatetime [User] [Days]` : Extend monitoring duration\n"
+        "📋 `/list` : View monitored targets\n"
+        "🗑️ `/del [List_User]` : Remove targets from monitoring"
     )
     bot.reply_to(message, menu, parse_mode="Markdown")
 
@@ -593,37 +591,37 @@ def send_welcome(message):
 def handle_quick_check(message):
     msg_parts = message.text.split()
     if len(msg_parts) < 2:
-        bot.reply_to(message, "⚠️ Cú pháp: `/check [username]`")
+        bot.reply_to(message, "⚠️ Usage: `/check [username]`")
         return
     username = extract_username_from_link(msg_parts[1].strip())
-    status_msg = bot.reply_to(message, f"🔍 Đang kiểm tra `@{username}`...")
+    status_msg = bot.reply_to(message, f"🔍 Checking status for `@{username}`...")
     
     res = check_instagram_status_via_gateway(username)
-    icon = "🟢 LIVE" if res == "LIVE" else ("🟡 UNKNOWN (Nghẽn mạng)" if res == "UNKNOWN" else "🔴 DIE")
+    icon = "🟢 LIVE" if res == "LIVE" else ("🟡 UNKNOWN (Network Congestion)" if res == "UNKNOWN" else "🔴 DIE")
     now = get_vietnam_time().strftime("%Y-%m-%d %H:%M:%S")
     
     db_info = get_single_target(message.from_user.id, username)
-    time_report = "Chưa lưu trong DB"
-    note_report = "Trống"
-    created_report = "Chưa ghi nhận"
-    duration_report = "Chưa hoàn tất"
+    time_report = "Not in database"
+    note_report = "None"
+    created_report = "Not recorded"
+    duration_report = "Pending"
     
     if db_info:
         time_report = get_time_remaining_string(db_info[0])
-        note_report = db_info[1] if db_info[1] else "Trống"
-        created_report = f"{db_info[2]} VN" if db_info[2] else "Chưa ghi nhận"
-        duration_report = db_info[4] if db_info[4] else "Đang đếm thời gian..."
+        note_report = db_info[1] if db_info[1] else "None"
+        created_report = f"{db_info[2]} UTC+7" if db_info[2] else "Not recorded"
+        duration_report = db_info[4] if db_info[4] else "Timer active..."
         
     output = (
-        f"📊 **KẾT QUẢ KIỂM TRA:**\n"
+        f"📊 **TARGET STATUS REPORT:**\n"
         f"----------------------------------------\n"
-        f"👤 Mục tiêu: `@{username}`\n"
-        f"⚡ Trạng thái: {icon}\n"
-        f"📆 Ngày nạp: `{created_report}`\n"
-        f"⏳ Hạn còn lại: `{time_report}`\n"
+        f"👤 Target: `@{username}`\n"
+        f"⚡ Status: {icon}\n"
+        f"📆 Added Date: `{created_report}`\n"
+        f"⏳ Time Left: `{time_report}`\n"
         f"⏱️ Times Taken: `{duration_report}`\n"
-        f"📝 Ghi chú: `{note_report}`\n"
-        f"⏰ Kiểm tra lúc: [{now} VN]\n"
+        f"📝 Note: `{note_report}`\n"
+        f"⏰ Checked At: [{now} UTC+7]\n"
         f"----------------------------------------"
     )
     bot.edit_message_text(output, chat_id=message.chat.id, message_id=status_msg.message_id, parse_mode="Markdown")
@@ -632,10 +630,10 @@ def handle_quick_check(message):
 def handle_user_check(message):
     raw_text = message.text.replace('/user', '', 1).strip()
     if not raw_text:
-        bot.reply_to(message, "⚠️ Cú pháp:\n`/user [list_nick] [số_ngày] [ghi_chú]`", parse_mode="Markdown")
+        bot.reply_to(message, "⚠️ Usage:\n`/user [username_list] [days] [note]`", parse_mode="Markdown")
         return
         
-    match_parser = re.search(r'\s+(\d+)\s+(.+)$', raw_text)
+    match_parser = re.search(r'\s+(\d+)\s+(.+)\$', raw_text)
     if match_parser:
         days = int(match_parser.group(1))
         note_text = match_parser.group(2).strip()
@@ -652,15 +650,15 @@ def handle_user_check(message):
         
     targets_to_add = [item.strip() for item in re.split(r'[\s,\n]+', list_raw_part) if item.strip()]
     if not targets_to_add:
-        bot.reply_to(message, "❌ Danh sách tài khoản trống!")
+        bot.reply_to(message, "❌ Target list is empty!")
         return
         
-    note_msg = f" |\nGhi chú: *\"{note_text}\"*" if note_text else ""
-    bot.reply_to(message, f"⚙️ Tiếp nhận {len(targets_to_add)} mục tiêu. Hạn: **{days} ngày**{note_msg}...\nBắt đầu kích hoạt bộ đếm thời gian từ 00:00:00!", parse_mode="Markdown")
+    note_msg = f" |\nNote: *\"{note_text}\"*" if note_text else ""
+    bot.reply_to(message, f"⚙️ Received {len(targets_to_add)} targets. Duration: **{days} days**{note_msg}...\nStopwatch started from 00:00:00!", parse_mode="Markdown")
     
-    report = f"📋 **KẾT QUẢ NẠP ({days} ngày):**\n"
+    report = f"📋 **TARGET REGISTRATION REPORT ({days} days):**\n"
     if note_text:
-        report += f"📝 Ghi chú: `{note_text}`\n"
+        report += f"📝 Note: `{note_text}`\n"
     report += "----------------------------------------\n\n"
     
     customer_id = message.from_user.id
@@ -669,14 +667,13 @@ def handle_user_check(message):
         res = check_instagram_status_via_gateway(username)
         status_str = "LIVE" if res == "LIVE" else "DIE"
         
-        # Nạp mục tiêu kèm mốc thời gian bắt đầu
         add_to_customer_list(customer_id, username, "USER", status_str, days, note_text)
         
         icon = "🟢 Live" if res == "LIVE" else "🔴 Die"
         report += f"👤 `@{username}` ➔ {icon}\n"
         time.sleep(1)
         
-    report += f"\n✅ Đã đồng bộ vào cơ sở dữ liệu giám sát!"
+    report += f"\n✅ Successfully synchronized with radar database!"
     for text in util.smart_split(report, chars_per_string=3000):
         bot.send_message(message.chat.id, text, parse_mode="Markdown")
 
@@ -684,80 +681,80 @@ def handle_user_check(message):
 def handle_add_note(message):
     msg_parts = message.text.split(maxsplit=2)
     if len(msg_parts) < 3:
-        bot.reply_to(message, "⚠️ Cú pháp: `/note [Tên_User] [Nội_dung]`")
+        bot.reply_to(message, "⚠️ Usage: `/note [username] [content]`")
         return
     username = extract_username_from_link(msg_parts[1].strip())
     note_text = msg_parts[2].strip()
     if update_target_note(message.from_user.id, username, note_text):
-        bot.reply_to(message, f"📝 Đã cập nhật ghi chú cho `@{username}`:\n➔ *\"{note_text}\"*", parse_mode="Markdown")
+        bot.reply_to(message, f"📝 Updated note for `@{username}`:\n➔ *\"{note_text}\"*", parse_mode="Markdown")
     else:
-        bot.reply_to(message, "❌ Không tìm thấy tài khoản trong danh sách.")
+        bot.reply_to(message, "❌ Target not found in your monitoring list.")
 
 @bot.message_handler(commands=['updatetime'])
 def handle_update_time(message):
     msg_parts = message.text.split()
     if len(msg_parts) < 3:
-        bot.reply_to(message, "⚠️ Cú pháp: `/updatetime [Tên_User] [Số_Ngày]`")
+        bot.reply_to(message, "⚠️ Usage: `/updatetime [username] [days]`")
         return
     username = extract_username_from_link(msg_parts[1].strip())
     days_str = msg_parts[2].strip()
     if not days_str.isdigit():
-        bot.reply_to(message, "❌ Số ngày phải là số nguyên dương!")
+        bot.reply_to(message, "❌ Number of days must be a positive integer!")
         return
     days = int(days_str)
     if update_target_time_cumulative(message.from_user.id, username, days):
-        bot.reply_to(message, f"⏳ Đã cộng dồn hạn cho `@{username}` thêm **{days} ngày**!", parse_mode="Markdown")
+        bot.reply_to(message, f"⏳ Successfully extended duration for `@{username}` by **{days} days**!", parse_mode="Markdown")
     else:
-        bot.reply_to(message, "❌ Không tìm thấy tài khoản trong danh sách.")
+        bot.reply_to(message, "❌ Target not found in your monitoring list.")
 
 @bot.message_handler(commands=['del'])
 def handle_delete_target(message):
     targets = parse_bulk_inputs(message.text, '/del')
     if not targets:
-        bot.reply_to(message, "⚠️ Cú pháp: `/del nick1 nick2 ...`")
+        bot.reply_to(message, "⚠️ Usage: `/del user1 user2 ...`")
         return
     customer_id = message.from_user.id
     deleted_count = 0
-    report = "🗑️ **KẾT QUẢ GỠ BỎ MỤC TIÊU:**\n\n"
+    report = "🗑️ **BATCH REMOVAL REPORT:**\n\n"
     for item in targets:
         username = extract_username_from_link(item)
         if delete_from_customer_list(customer_id, username):
-            report += f"✅ Đã gỡ: `@{username}`\n"
+            report += f"✅ Removed: `@{username}`\n"
             deleted_count += 1
         else:
-            report += f"❌ Không tìm thấy: `@{username}`\n"
-    report += f"\n🗑️ Tổng cộng đã xóa: `{deleted_count}` tài khoản."
+            report += f"❌ Not found: `@{username}`\n"
+    report += f"\n🗑️ Total removed: `{deleted_count}` targets."
     bot.reply_to(message, report, parse_mode="Markdown")
 
 @bot.message_handler(commands=['list'])
 def handle_list_users(message):
     rows = get_targets_by_customer(message.from_user.id)
     if not rows:
-        bot.reply_to(message, "📭 Danh sách theo dõi hiện đang trống!")
+        bot.reply_to(message, "📭 Your monitoring list is currently empty!")
         return
-    report = "📋 **DANH SÁCH MỤC TIÊU ĐANG THEO DÕI:**\n\n"
+    report = "📋 **MONITORED TARGETS LIST:**\n\n"
     for index, (username, last_status, expire_date, note) in enumerate(rows, 1):
         icon = "🟢 Live" if last_status == "LIVE" else "🔴 Die"
         days_left = get_days_only(expire_date)
         ig_link = f"https://www.instagram.com/{username}/"
-        report += f"**{index}**. {icon} - [{username}]({ig_link}) (Còn `{days_left} ngày`)\n"
+        report += f"**{index}**. {icon} - [{username}]({ig_link}) (`{days_left} days left`)\n"
         
     for text in util.smart_split(report, chars_per_string=3000):
         bot.send_message(message.chat.id, text, parse_mode="Markdown", disable_web_page_preview=True)
 
 # =====================================================================
-# 🏁 KHỞI CHẠY HỆ THỐNG (BỌC CHỐNG CRASH CHO MÁY CÁ NHÂN)
+# 🏁 SYSTEM ENTRY POINT (CRASH-RESISTANT POLLING LOOP)
 # =====================================================================
 if __name__ == "__main__":
     init_db()
     radar_thread = threading.Thread(target=auto_scan_commercial_radar_v8, daemon=True)
     radar_thread.start()
-    print("🚀 [HỆ THỐNG] Radar v22.0 đã kích hoạt. Bắt đầu nhận lệnh...")
+    print("🚀 [SYSTEM] Radar v22.0 active. Listening for commands...")
     
-    # Vòng lặp duy trì kết nối polling liên tục, tự khôi phục khi mất mạng
+    # Resilient polling loop: Auto-reconnect on network interruptions
     while True:
         try:
             bot.polling(none_stop=True, timeout=60, long_polling_timeout=20)
         except Exception as e:
-            print(f"⚠️ [MẠNG] Telegram Polling bị ngắt: {e}. Thử kết nối lại sau 5s...")
+            print(f"⚠️ [NETWORK] Polling interrupted: {e}. Retrying in 5 seconds...")
             time.sleep(5)
