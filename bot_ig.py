@@ -501,15 +501,17 @@ def handle_admin_panel(message):
     key_display = f"`{active_key[:8]}...{active_key[-5:]}`" if active_key else "`Empty`"
     
     menu_admin = (
-        "👑 **ADMIN CONTROL PANEL**\n"
+        " **ADMIN CONTROL PANEL**\n"
         "----------------------------------------\n"
-        "⚙️ `/settoken [Key]` : Prepend 1 new token to the front of queue\n"
-        "⚙️ `/setpool [k1 k2 ...]` : Load multiple tokens into the queue\n"
-        "📊 `/viewdata` : Export target monitoring list\n"
+        " `/settoken [Key]` : Prepend 1 new token to the front of queue\n"
+        " `/setpool [k1 k2 ...]` : Load multiple tokens into the queue\n"
+        " `/deltoken [Key]` : Remove a specific token from queue\n"
+        " `/clearpool` : Wipe all tokens from the queue\n"
+        " `/viewdata` : Export target monitoring list\n"
         "----------------------------------------\n"
-        f"🎯 *Tokens in queue:* `{total_keys}`\n"
-        f"🔑 *Active Token:* {key_display}\n"
-        f"📊 *Current Quota:* `{quota_str}`"
+        f" *Tokens in queue:* `{total_keys}`\n"
+        f" *Active Token:* {key_display}\n"
+        f" *Current Quota:* `{quota_str}`"
     )
     bot.reply_to(message, menu_admin, parse_mode="Markdown")
 
@@ -543,6 +545,60 @@ def handle_set_pool(message):
     INTERNAL_USAGE_COUNTER = 0
     IS_QUOTA_ALERT_SENT = False
     bot.reply_to(message, f"✅ Successfully loaded `{len(API_POOL)}` tokens into the sequential queue!", parse_mode="Markdown")
+
+@bot.message_handler(commands=['clearpool'])
+def handle_clear_pool(message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    global API_POOL, CURRENT_API_INDEX, INTERNAL_USAGE_COUNTER, IS_QUOTA_ALERT_SENT
+    
+    API_POOL.clear()
+    CURRENT_API_INDEX = 0
+    INTERNAL_USAGE_COUNTER = 0
+    IS_QUOTA_ALERT_SENT = True  # Đánh dấu cạn pool để tránh spam alert thừa
+    
+    bot.reply_to(
+        message,
+        "🗑️ **API POOL CLEARED!**\n\n"
+        "All tokens have been wiped from the queue. Background scans will be held on `UNKNOWN` until new tokens are added via `/setpool` or `/settoken`.",
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(commands=['deltoken'])
+def handle_del_token(message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    msg_parts = message.text.split()
+    if len(msg_parts) < 2:
+        bot.reply_to(message, "⚠️ Usage: `/deltoken [token_key]`")
+        return
+        
+    global API_POOL, CURRENT_API_INDEX, INTERNAL_USAGE_COUNTER
+    target_token = re.sub(r'[\s\n\r]', '', msg_parts[1])
+    
+    # Tìm token khớp trong pool (so sánh chính xác hoặc tìm token chứa chuỗi con)
+    matched = [k for k in API_POOL if k == target_token or target_token in k]
+    if not matched:
+        bot.reply_to(message, f"❌ Token not found in current pool: `{target_token}`", parse_mode="Markdown")
+        return
+        
+    removed_token = matched[0]
+    token_idx = API_POOL.index(removed_token)
+    API_POOL.remove(removed_token)
+    
+    # Nếu xóa đúng token đang chạy ở đầu hàng chờ (index 0), reset lại quota cho token kế tiếp
+    if token_idx == CURRENT_API_INDEX:
+        CURRENT_API_INDEX = 0
+        INTERNAL_USAGE_COUNTER = 0
+        
+    key_preview = f"`{removed_token[:8]}...{removed_token[-5:]}`" if len(removed_token) > 13 else f"`{removed_token}`"
+    bot.reply_to(
+        message,
+        f"✅ **TOKEN REMOVED SUCCESSFULLY!**\n\n"
+        f"🗑️ Deleted: {key_preview}\n"
+        f"🗂️ Remaining tokens in pool: `{len(API_POOL)}`",
+        parse_mode="Markdown"
+    )
 
 @bot.message_handler(commands=['viewdata'])
 def handle_view_data(message):
