@@ -1370,8 +1370,10 @@ def handle_set_token(message):
     if len(msg_parts) < 2:
         bot.reply_to(message, "⚠️ Usage: <code>/settoken [token_key]</code>", parse_mode="HTML")
         return
+        
     global API_POOL, CURRENT_API_INDEX, INTERNAL_USAGE_COUNTER, IS_QUOTA_ALERT_SENT
     clean_token = re.sub(r'\s+', '', msg_parts[1])
+    
     with pool_lock:
         if clean_token in API_POOL:
             API_POOL.remove(clean_token)
@@ -1380,7 +1382,16 @@ def handle_set_token(message):
         INTERNAL_USAGE_COUNTER = 0
         IS_QUOTA_ALERT_SENT = False
         total = len(API_POOL)
-    bot.reply_to(message, f"✅ Successfully added new token to queue front (Total: <code>{total}</code> keys)!", parse_mode="HTML")
+        active_preview = clean_token[:8] + "..." + clean_token[-5:] if len(clean_token) > 13 else clean_token
+        
+    bot.reply_to(
+        message, 
+        f"✅ <b>SET TOKEN SUCCESSFUL!</b>\n\n"
+        f"🚀 Active Token: <code>{active_preview}</code>\n"
+        f"📊 Quota Reset: <code>1000/1000</code>\n"
+        f"🗂️ Total in Queue: <code>{total}</code> tokens", 
+        parse_mode="HTML"
+    )
 
 @bot.message_handler(commands=['setpool'])
 def handle_set_pool(message):
@@ -1390,30 +1401,34 @@ def handle_set_pool(message):
     if not targets:
         bot.reply_to(message, "⚠️ Usage: <code>/setpool key1 key2 ...</code>", parse_mode="HTML")
         return
+        
     global API_POOL, CURRENT_API_INDEX, INTERNAL_USAGE_COUNTER, IS_QUOTA_ALERT_SENT
     
-    # Sửa lỗi: Làm sạch dữ liệu và chỉ nối thêm key mới vào queue hiện tại
     new_keys = [re.sub(r'\s+', '', k) for k in targets if k.strip()]
     with pool_lock:
         added_keys = [k for k in dict.fromkeys(new_keys) if k not in API_POOL]
         if not added_keys:
             bot.reply_to(message, "⚠️ All provided tokens already exist in the queue!")
             return
+            
         was_empty = len(API_POOL) == 0
         API_POOL.extend(added_keys)
+        
         if was_empty:
             CURRENT_API_INDEX = 0
             INTERNAL_USAGE_COUNTER = 0
             IS_QUOTA_ALERT_SENT = False
+            
         total_len = len(API_POOL)
-        active_preview = API_POOL[CURRENT_API_INDEX][:8] + "..." + API_POOL[CURRENT_API_INDEX][-5:]
+        current_token = API_POOL[CURRENT_API_INDEX]
+        active_preview = current_token[:8] + "..." + current_token[-5:] if len(current_token) > 13 else current_token
         
     bot.reply_to(
         message,
-        f"✅ <b>POOL QUEUE UPDATED!</b>\n\n"
-        f"➕ Added to queue: <code>{len(added_keys)}</code> new tokens\n"
-        f"🗂️ Total tokens in queue: <code>{total_len}</code>\n"
-        f"🚀 Active Token: <code>{active_preview}</code>",
+        f"✅ <b>SET POOL SUCCESSFUL!</b>\n\n"
+        f"➕ Added: <code>{len(added_keys)}</code> new tokens\n"
+        f"🗂️ Total Tokens in Pool: <code>{total_len}</code>\n"
+        f"🚀 Current Active Token: <code>{active_preview}</code>",
         parse_mode="HTML"
     )
 
