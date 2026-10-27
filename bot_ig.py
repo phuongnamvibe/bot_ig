@@ -500,9 +500,9 @@ def handle_admin_panel(message):
     key_display = f"`{active_key[:8]}...{active_key[-5:]}`" if active_key else "`Empty`"
 
     menu_admin = (
-        " **ADMIN CONTROL PANEL_c**\n"
+        " **ADMIN CONTROL PANEL**\n"
         "----------------------------------------\n"
-        " `/settoken [Key]` : Prepend 1 new token to the front of queue\n"
+        " `/settoken [Key]c` : Prepend 1 new token to the front of queue\n"
         " `/setpool [k1 k2 ...]` : Load multiple tokens into the queue\n"
         " `/deltoken [Key]` : Remove a specific token from queue\n"
         " `/clearpool` : Wipe all tokens from the queue\n"
