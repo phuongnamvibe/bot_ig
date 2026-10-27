@@ -56,12 +56,12 @@ def switch_to_next_api_logic():
     global CURRENT_API_INDEX, API_POOL, INTERNAL_USAGE_COUNTER
     if not API_POOL:
         return False
-        
+
     try:
         API_POOL.pop(CURRENT_API_INDEX)
     except:
         pass
-        
+
     INTERNAL_USAGE_COUNTER = 0
     if API_POOL and CURRENT_API_INDEX < len(API_POOL):
         try:
@@ -120,52 +120,62 @@ def get_time_remaining_string(expire_date_str):
 # =====================================================================
 # ⚡ INSTAGRAM GATEWAY ENGINE
 # =====================================================================
-def check_instagram_status_via_gateway(username):
+def check_instagram_status_via_gateway(username, retry_count=0):
     global INTERNAL_USAGE_COUNTER, IS_QUOTA_ALERT_SENT
     active_token = get_current_token()
     if not active_token:
         return "UNKNOWN"
-        
+
     target_url = f"https://www.instagram.com/{username}/"
     api_url = f"https://api.scrape.do/?token={active_token}&url={target_url}&geo=us"
-    
+
     quota_val, _ = fetch_remaining_quota()
     if quota_val <= 0:
         if switch_to_next_api_logic():
             return check_instagram_status_via_gateway(username)
         raise ValueError("ALL_API_POOL_EXCEEDED")
-        
+
     try:
         response = requests.get(api_url, timeout=20)
         INTERNAL_USAGE_COUNTER += 1
-        
+        # Xử lý bẫy lỗi HTTP 429 và 403
         if response.status_code in [429, 403]:
-            if switch_to_next_api_logic():
-                return check_instagram_status_via_gateway(username)
-            raise ValueError("ALL_API_POOL_EXCEEDED")
-            
+            err_text = response.text.lower()
+            # Kiểm tra xem có phải thực sự hết cước tháng hay token chết không
+            is_real_quota_dead = any(keyword in err_text for keyword in [
+                "quota", "limit reached", "out of credit", "subscription", "expired", "inactive", "invalid token"
+            ])
+
+            if is_real_quota_dead:
+                print(f"⚠️ [QUOTA EXHAUSTED] Token thực sự cạn hạn mức: {response.text}")
+                if switch_to_next_api_logic():
+                    return check_instagram_status_via_gateway(username)
+                raise ValueError("ALL_API_POOL_EXCEEDED")
+            else:
+                # Chỉ bị Rate-limit / Quá tải concurrency tạm thời -> Không xóa key!
+                if retry_count < 2:
+                    print(f"⏳ [RATE LIMIT] Bị giới hạn tốc độ tức thời (Status {response.status_code}). Chờ 6s rồi thử lại...")
+                    time.sleep(6)
+                    return check_instagram_status_via_gateway(username, retry_count + 1)
+                else:
+                    return "UNKNOWN"
+
         if response.status_code in [500, 502, 504]:
             return "UNKNOWN"
         if response.status_code == 404:
             return "DIE"
-            
         html_content = response.text
         low_html = html_content.lower()
         user_lower = username.lower()
-        
         if f'"{user_lower}"' not in low_html and f'://www.instagram.com/{user_lower}' not in low_html:
             return "DIE"
-            
         title_match = re.search(r'<title>(.*?)</title>', html_content, re.IGNORECASE)
         page_title = title_match.group(1).strip() if title_match else ""
         low_title = page_title.lower()
-        
         if "login" in low_title or "đăng nhập" in low_title or "iniciar" in low_title or "connexion" in low_title or not page_title:
             return "UNKNOWN"
-            
         if 'profilepage' in low_html or user_lower in low_title or "@" in page_title:
             return "LIVE"
-            
         return "UNKNOWN"
     except Exception as e:
         if "ALL_API_POOL_EXCEEDED" in str(e) or not API_POOL:
@@ -183,7 +193,6 @@ def check_instagram_status_via_gateway(username):
                 except:
                     pass
         return "UNKNOWN"
-
 # =====================================================================
 # 💾 SQLITE DATABASE ENGINE (WITH REVIVAL DURATION TRACKING)
 # =====================================================================
@@ -345,14 +354,13 @@ def auto_scan_commercial_radar_v8():
             cursor = conn.cursor()
             cursor.execute('SELECT user_id, target_value, expire_date FROM customer_targets WHERE target_type = "USER"')
             all_checks = cursor.fetchall()
-            
             vn_now_str = get_vietnam_time().strftime("%Y-%m-%d %H:%M:%S")
             for u_id, target, exp_date in all_checks:
                 if exp_date and exp_date < vn_now_str:
                     cursor.execute('DELETE FROM customer_targets WHERE user_id = ? AND target_value = ?', (u_id, target))
                     try:
                         bot.send_message(
-                            u_id, 
+                            u_id,
                             f"⏰ **MONITORING EXPIRED!**\n\n"
                             f"👤 Target `@{target}` has reached its monitoring expiration date.\n"
                             f"The system has automatically removed this target from background monitoring."
@@ -360,38 +368,31 @@ def auto_scan_commercial_radar_v8():
                     except:
                         pass
             conn.commit()
-            
             cursor.execute('SELECT user_id, target_value, last_status, added_at FROM customer_targets WHERE target_type = "USER"')
             all_targets = cursor.fetchall()
             conn.close()
-            
             total_tasks = len(all_targets)
             if total_tasks > 0:
                 now_time = get_vietnam_time().strftime('%H:%M:%S')
                 _, quota_str = fetch_remaining_quota()
                 total_keys = len(API_POOL)
                 print(f"\n🚀 [RADAR SCAN] - {now_time} UTC+7 | [Pool: {total_keys} Keys | Active: 1/{total_keys} | Current Quota: {quota_str}] | Total: {total_tasks} accounts")
-                
                 for index, (user_id, target_value, last_status, added_at_str) in enumerate(all_targets, 1):
                     current_time_str = get_vietnam_time().strftime('%H:%M:%S')
                     current_result = check_instagram_status_via_gateway(target_value)
-                    
                     icon_terminal = "🟢 LIVE" if current_result == "LIVE" else "🔴 DIE"
-                    if current_result == "UNKNOWN": 
+                    if current_result == "UNKNOWN":
                         icon_terminal = "🟡 UNKNOWN"
                     print(f"👉 [{current_time_str}] [{index}/{total_tasks}] @{target_value} ➔ {icon_terminal}")
-                    
                     # Detect status transition: DIE -> LIVE (Revived)
                     if last_status == "DIE" and current_result == "LIVE":
                         time.sleep(2)
                         res2 = check_instagram_status_via_gateway(target_value)
                         time.sleep(2)
                         res3 = check_instagram_status_via_gateway(target_value)
-                        
                         if current_result == res2 == res3 == "LIVE":
                             vn_now = get_vietnam_time()
                             now = vn_now.strftime("%Y-%m-%d %H:%M:%S")
-                            
                             times_taken_str = "0h 0m 0s"
                             if added_at_str:
                                 try:
@@ -400,9 +401,7 @@ def auto_scan_commercial_radar_v8():
                                     times_taken_str = format_duration(duration_sec)
                                 except:
                                     pass
-                            
                             update_status_db(user_id, target_value, "LIVE", times_taken_str)
-                            
                             bot.send_message(
                                 user_id, 
                                 f"🔔 **ACCOUNT REVIVED NOTIFICATION!** 🎉\n\n"
@@ -424,7 +423,7 @@ def auto_scan_commercial_radar_v8():
                                 reply_markup=markup, 
                                 parse_mode="Markdown"
                             )
-                            
+
                     elif last_status == "LIVE" and current_result == "DIE":
                         update_status_db(user_id, target_value, "DIE")
                         now = get_vietnam_time().strftime("%Y-%m-%d %H:%M:%S")
@@ -437,7 +436,7 @@ def auto_scan_commercial_radar_v8():
                             parse_mode="Markdown"
                         )
                     time.sleep(random.uniform(2, 4))
-                
+
                 finish_time = get_vietnam_time().strftime('%H:%M:%S')
                 print(f"🏁 Patrol cycle completed at {finish_time} UTC+7. Sleeping for 5 minutes...\n")
             time.sleep(300)
@@ -453,7 +452,7 @@ def handle_admin_decision(call):
     user_id = int(user_id)
     vn_now = get_vietnam_time()
     now = vn_now.strftime("%Y-%m-%d %H:%M:%S")
-    
+
     if action == "force_live":
         db_info = get_single_target(user_id, target_value)
         times_taken_str = "0h 0m 0s"
@@ -464,7 +463,7 @@ def handle_admin_decision(call):
                 times_taken_str = format_duration(duration_sec)
             except:
                 pass
-                
+
         update_status_db(user_id, target_value, "LIVE", times_taken_str)
         bot.edit_message_text(f"✅ Approved `@{target_value}`: LIVE.", call.message.chat.id, call.message.message_id)
         bot.send_message(
@@ -499,7 +498,7 @@ def handle_admin_panel(message):
     active_key = get_current_token()
     total_keys = len(API_POOL)
     key_display = f"`{active_key[:8]}...{active_key[-5:]}`" if active_key else "`Empty`"
-    
+
     menu_admin = (
         " **ADMIN CONTROL PANEL**\n"
         "----------------------------------------\n"
@@ -540,11 +539,27 @@ def handle_set_pool(message):
         bot.reply_to(message, "⚠️ Usage: `/setpool key1 key2 ...`")
         return
     global API_POOL, CURRENT_API_INDEX, INTERNAL_USAGE_COUNTER, IS_QUOTA_ALERT_SENT
-    API_POOL = [re.sub(r'[\s\n\r]', '', k) for k in targets]
-    CURRENT_API_INDEX = 0
-    INTERNAL_USAGE_COUNTER = 0
-    IS_QUOTA_ALERT_SENT = False
-    bot.reply_to(message, f"✅ Successfully loaded `{len(API_POOL)}` tokens into the sequential queue!", parse_mode="Markdown")
+    API_POOL = [re.sub(r'[\s\n\r]', '', k) for k in targets if k.strip()]
+    added_keys = [k for k in new_keys if k not in API_POOL]
+
+    if not added_keys:
+        bot.reply_to(message, "⚠️ All provided tokens already exist in the queue!", parse_mode="Markdown")
+        return
+    was_empty = len(API_POOL) == 0
+    API_POOL.extend(added_keys)
+    if was_empty:
+        CURRENT_API_INDEX = 0
+        INTERNAL_USAGE_COUNTER = 0
+        IS_QUOTA_ALERT_SENT = False
+
+    bot.reply_to(
+        message, 
+        f"✅ **POOL QUEUE UPDATED SUCCESSFULLY!**\n\n"
+        f"➕ Added to queue: `{len(added_keys)}` new tokens\n"
+        f"🗂️ Total tokens in queue: `{len(API_POOL)}`\n"
+        f"🚀 Active Token: `{API_POOL[CURRENT_API_INDEX][:8]}...{API_POOL[CURRENT_API_INDEX][-5:]}`",
+        parse_mode="Markdown"
+    )
 
 @bot.message_handler(commands=['clearpool'])
 def handle_clear_pool(message):
