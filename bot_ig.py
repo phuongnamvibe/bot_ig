@@ -979,18 +979,25 @@ def check_instagram_status_via_gateway(username, retry_count=0):
 
     target_url = f"https://www.instagram.com/{username}/"
     api_endpoint = "https://api.scrape.do/"
+    
+    # Gửi kèm tham số geo và headers chuẩn để tránh bị ép về màn hình Login
     params = {
         "token": active_token,
         "url": target_url,
         "geo": "us"
     }
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9"
+    }
 
     try:
-        response = requests.get(api_endpoint, params=params, timeout=25)
+        response = requests.get(api_endpoint, params=params, headers=headers, timeout=25)
         with pool_lock:
             INTERNAL_USAGE_COUNTER += 1
 
-        # Xử lý mã lỗi giới hạn hoặc cạn cước
+        # Xử lý mã lỗi Rate-limit / Quota
         if response.status_code in [429, 403]:
             err_text = response.text.lower()
             is_real_quota_dead = any(k in err_text for k in [
@@ -1022,13 +1029,7 @@ def check_instagram_status_via_gateway(username, retry_count=0):
         page_title = title_match.group(1).strip() if title_match else ""
         low_title = page_title.lower()
 
-        # 1. Bẫy trang Login / Chặn Captcha / Chuyển hướng trước (Chống nhận định nhầm sang DIE)
-        if any(term in low_title for term in ["login", "đăng nhập", "iniciar", "connexion"]) or not page_title:
-            return "UNKNOWN"
-        if "challenge" in low_html or "checkpoint" in low_html:
-            return "UNKNOWN"
-
-        # 2. Nhận diện dấu hiệu DIE chính xác
+        # 1. Nhận diện dấu hiệu DIE rõ ràng từ nội dung Instagram
         die_indicators = [
             "sorry, this page isn't available",
             "trang này không hiển thị",
@@ -1038,14 +1039,23 @@ def check_instagram_status_via_gateway(username, retry_count=0):
         if any(ind in low_html for ind in die_indicators):
             return "DIE"
 
-        # 3. Nhận diện dấu hiệu LIVE
-        if ('profilepage' in low_html or 
-            user_lower in low_title or 
-            f'@{user_lower}' in low_title or 
-            f'instagram.com/{user_lower}' in low_html):
+        # 2. Nhận diện dấu hiệu LIVE (Quét cả Title, Meta Tags và cấu trúc Schema/JSON-LD)
+        # Các nick lớn như leomessi thường có format: "... (@leomessi) • Instagram..."
+        if (
+            f"@{user_lower}" in low_title or 
+            f"({user_lower})" in low_title or 
+            f"/{user_lower}/" in low_html or
+            f'"username":"{user_lower}"' in low_html or
+            f'content="https://www.instagram.com/{user_lower}/"' in low_html or
+            'profilepage' in low_html
+        ):
             return "LIVE"
 
-        # 4. Trường hợp không tìm thấy bất kỳ dấu hiệu định danh nào
+        # 3. Chỉ coi là UNKNOWN nếu dính màn hình Captcha / Checkpoint hoặc trang hoàn toàn không load được title
+        if any(term in low_title for term in ["login", "đăng nhập", "iniciar", "connexion"]) or "checkpoint" in low_html or "challenge" in low_html:
+            return "UNKNOWN"
+
+        # 4. Trường hợp không tìm thấy bất kỳ dấu hiệu định danh nào của tài khoản
         if f'"{user_lower}"' not in low_html and f'://www.instagram.com/{user_lower}' not in low_html:
             return "DIE"
 
