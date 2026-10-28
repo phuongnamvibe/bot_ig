@@ -494,30 +494,31 @@ def auto_scan_commercial_radar_v8():
             time.sleep(10)
 
 # =====================================================================
-# 📡 GLOBAL COMMAND MONITORING (ADMIN NOTIFICATIONS)
+# 📡 GLOBAL COMMAND MONITORING (MIDDLEWARE CHUẨN)
 # =====================================================================
-@bot.message_handler(func=lambda message: message.text and message.text.startswith('/'), content_types=['text'])
-def global_command_interceptor(message):
-    if ADMIN_CHAT_ID and message.from_user.id != ADMIN_CHAT_ID:
-        try:
-            user_full = message.from_user.full_name or "N/A"
-            username = f"@{message.from_user.username}" if message.from_user.username else "No username"
-            now_str = get_vietnam_time().strftime("%H:%M:%S %d/%m/%Y")
-            
-            admin_notify = (
-                f"🚨 **USER COMMAND EXECUTION!**\n"
-                f"----------------------------------------\n"
-                f"👤 **User:** {user_full} ({username})\n"
-                f"🆔 **User ID:** `{message.from_user.id}`\n"
-                f"💬 **Command:** `{message.text}`\n"
-                f"⏰ **Time:** [{now_str} UTC+7]\n"
-                f"----------------------------------------"
-            )
-            bot.send_message(ADMIN_CHAT_ID, admin_notify, parse_mode="Markdown")
-        except Exception as e:
-            print(f"Failed to notify admin: {e}")
-            
-    bot.process_new_messages([message])
+@bot.middleware_handler(update_types=['message'])
+def notify_admin_on_commands(bot_instance, message):
+    # Chỉ bắt tin nhắn dạng văn bản và bắt đầu bằng dấu '/'
+    if message.text and message.text.startswith('/'):
+        # Không báo nếu chính admin gõ (tránh spam admin)
+        if ADMIN_CHAT_ID and message.from_user.id != ADMIN_CHAT_ID:
+            try:
+                user_full = message.from_user.full_name or "N/A"
+                username = f"@{message.from_user.username}" if message.from_user.username else "No username"
+                now_str = get_vietnam_time().strftime("%H:%M:%S %d/%m/%Y")
+                
+                admin_notify = (
+                    f"🚨 **USER COMMAND EXECUTION!**\n"
+                    f"----------------------------------------\n"
+                    f"👤 **User:** {user_full} ({username})\n"
+                    f"🆔 **User ID:** `{message.from_user.id}`\n"
+                    f"💬 **Command:** `{message.text}`\n"
+                    f"⏰ **Time:** [{now_str} UTC+7]\n"
+                    f"----------------------------------------"
+                )
+                bot.send_message(ADMIN_CHAT_ID, admin_notify, parse_mode="Markdown")
+            except Exception as e:
+                print(f"Failed to notify admin: {e}")
 
 # =====================================================================
 # 🎛️ ADMIN INLINE CALLBACK HANDLER
