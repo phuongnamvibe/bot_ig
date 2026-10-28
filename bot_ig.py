@@ -8,6 +8,7 @@ import threading
 import random
 from telebot import util
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot import apihelper
 from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 
@@ -18,6 +19,7 @@ load_dotenv()
 # =====================================================================
 # 🛠️ CONFIGURATION & THREAD SAFETY LOCKS
 # =====================================================================
+apihelper.ENABLE_MIDDLEWARE = True
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 bot = telebot.TeleBot(TOKEN)
 
