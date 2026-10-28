@@ -496,13 +496,11 @@ def auto_scan_commercial_radar_v8():
             time.sleep(10)
 
 # =====================================================================
-# 📡 GLOBAL COMMAND MONITORING (MIDDLEWARE CHUẨN)
+# 📡 GLOBAL COMMAND MONITORING (MIDDLEWARE)
 # =====================================================================
 @bot.middleware_handler(update_types=['message'])
 def notify_admin_on_commands(bot_instance, message):
-    # Chỉ bắt tin nhắn dạng văn bản và bắt đầu bằng dấu '/'
     if message.text and message.text.startswith('/'):
-        # Không báo nếu chính admin gõ (tránh spam admin)
         if ADMIN_CHAT_ID and message.from_user.id != ADMIN_CHAT_ID:
             try:
                 user_full = message.from_user.full_name or "N/A"
