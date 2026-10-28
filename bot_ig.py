@@ -6,10 +6,11 @@ import re
 import time
 import threading
 import random
-from datetime import datetime, timedelta
 from telebot import util
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
+from datetime import datetime, timezone, timedelta
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -36,9 +37,13 @@ DEFAULT_MONITOR_DAYS = 7
 INTERNAL_USAGE_COUNTER = 0
 IS_QUOTA_ALERT_SENT = False
 
+# Định nghĩa múi giờ UTC+7
+VN_TZ = timezone(timedelta(hours=7))
+
 def get_vietnam_time():
-    """Synchronize UTC+7 timezone."""
-    return datetime.utcnow() + timedelta(hours=7)
+    """Synchronize UTC+7 timezone without deprecation warning."""
+    # Trả về datetime chuẩn múi giờ UTC+7 và bỏ tzinfo nếu muốn lưu chuỗi string thuần như cũ
+    return datetime.now(VN_TZ).replace(tzinfo=None)
 
 def get_current_token():
     """Retrieve the active token safely with lock."""
